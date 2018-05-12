@@ -39,7 +39,22 @@ Whitelist=(192.168.0.0/16 94.23.0.0/16 163.172.0.0/16 163.172.0.0/16) #lemonldap
 server_local_ip=192.168.1.4
 service_local_ip=192.168.1.5
 VPN_ports=(1196 1197)
-Services=('25' '53' '80' '443' '554' '1935' '3478' '4190' '5349' '5350' '8443' '9001' '9418' '9980') # removed some email-related ports: 993, 995, 587, 465
+#Services=('25' '53' '80' '443' '554' '1935' '3478' '4190' '5349' '5350' '8443' '9001' '9418' '9980') # removed some email-related ports: 993, 995, 587, 465
+declare -A Services
+Services[25]="smtp - postfix"
+Services[53]="dns - bind9"
+Services[80]="nginx - http"
+Services[443]="nginx - https"
+#Services[1935]="rtmp"
+Services[3478]="webrtc - turnserver"
+Services[4190]="imap - dovecot"
+Services[5349]="webrtc - turnserver"
+Services[5350]="webrtc - turnserver"
+Services[8443]="postfix"
+Services[9001]="etherpad-lite - node"
+Services[9418]="git-daemon"
+Services[9418]="git-daemon"
+Services[9980]="libreoffice online - loolwsd"
 # User connections: tcp ports for dns, browsing, email, XMR-mining at xmr.suprnova.cc:5221, bss_conn.c:246, and udp ports for ftp and DNS.
 User_Connections[21]="ftp"
 User_Connections[22]="ssh"
@@ -55,7 +70,7 @@ User_Connections[2701]="razor - spamassasin stuff"
 # see bottom of this script for main function
 
 # Log everything by creating and using logchains. 
-f_Setup_Log_Chains(){
+sys_Setup_Log_Chains(){
     iptables -N LOG_ACCEPT
     iptables -A LOG_ACCEPT -m limit --limit 15/m --limit-burst 30 -j NFLOG --nflog-group 0 --nflog-prefix "ACCEPT "
     # -j LOG --log-prefix "iptables: ACCEPT " --log-level 4
@@ -69,13 +84,13 @@ f_Setup_Log_Chains(){
 }
 
 # Allow everything auto-identified as a related connection:
-f_Allow_Related_Established(){
+sys_Allow_Related_Established(){
     iptables -A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j LOG_ACCEPT 
     iptables -A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j LOG_ACCEPT 
     iptables -P INPUT DROP
 }
 
-f_Allow_Localhost(){
+sys_Allow_Localhost(){
     # localhost connections are always allowed (failure to allow this will
     # break many programs which rely on localhost)
     iptables -A INPUT -i lo -j ACCEPT
@@ -95,31 +110,31 @@ f_Allow_Localhost(){
 
 # Enable outputs on OpenVPN interface for establishing VPN. Check your
 # /etc/openvpn/client.conf for protocol and port numbers.
-f_Allow_To_VPN(){
+sys_Allow_To_VPN(){
     for port in "$@"
     do
-	iptables -A OUTPUT -p udp --dport $port -j LOG_ACCEPT -m comment --comment "OVPN"
-	iptables -A OUTPUT -p tcp --dport $port -j LOG_ACCEPT -m comment --comment "OVPN"
+	iptables -A OUTPUT -p udp --dport "${port}" -j LOG_ACCEPT -m comment --comment "OVPN"
+	iptables -A OUTPUT -p tcp --dport "${port}" -j LOG_ACCEPT -m comment --comment "OVPN"
     done
 }
 
-f_Allow_Multicast_DNS(){
+sys_Allow_Multicast_DNS(){
     	# Allow local udp port 5353 for multicast DNS on local network port (avahi-daemon)
-	iptables -A INPUT -p udp --in-interface $1 --dport 5353 -j LOG_ACCEPT -m comment --comment "multicast-dns"
+	iptables -A INPUT -p udp --in-interface "${1}" --dport 5353 -j LOG_ACCEPT -m comment --comment "multicast-dns"
 	# Allow local outgoing multicast DNS connections
-	iptables -A OUTPUT -p udp --out-interface $1 -d 224.0.0.251 --dport 5353 -j LOG_ACCEPT -m comment --comment "multicast-dns"
+	iptables -A OUTPUT -p udp --out-interface "${1}" -d 224.0.0.251 --dport 5353 -j LOG_ACCEPT -m comment --comment "multicast-dns"
 }
 
-f_Reject_RFC1918(){
+sys_Reject_RFC1918(){
 # Reject packets from RFC1918 class networks (i.e., spoofed)
 RFC1918=('0.0.0.0/8' '10.0.0.0/8' '127.0.0.0/8' '169.254.0.0/16' '172.16.0.0/12' '192.168.0.0/16' '224.0.0.0/4' '239.255.255.0/24' '240.0.0.0/5' '255.255.255.255')
 for cidr in "${RFC1918[@]}" ; do
-    iptables -A INPUT -s "$cidr" -i $1 -j LOG_DROP -m comment --comment "RFC1918 class network - spoofed address"
-    iptables -A INPUT -d "$cidr" -i $1 -j LOG_DROP -m comment --comment "RFC1918 class network - spoofed address"
+    iptables -A INPUT -s "$cidr" -i "${1}" -j LOG_DROP -m comment --comment "RFC1918 class network - spoofed address"
+    iptables -A INPUT -d "$cidr" -i "${1}" -j LOG_DROP -m comment --comment "RFC1918 class network - spoofed address"
 done
 }
 
-f_Drop_Invalid_Packets(){
+sys_Drop_Invalid_Packets(){
 # Drop invalid packets immediately
 iptables -A INPUT   -m conntrack --ctstate INVALID -j LOG_DROP -m comment --comment "INVALID packet type"
 iptables -A FORWARD -m conntrack --ctstate INVALID -j LOG_DROP -m comment --comment "INVALID packet type"
@@ -130,11 +145,11 @@ iptables -A INPUT -p tcp -m tcp --tcp-flags SYN,RST SYN,RST -j LOG_DROP -m comme
 }
 
 # Additional ssh port
-f_Allow_Extra_SSH_Port(){
-    iptables -A INPUT -p tcp --dport $1 -j LOG_ACCEPT
+sys_Allow_Extra_SSH_Port(){
+    iptables -A INPUT -p tcp --dport "${1}" -j LOG_ACCEPT
 }
 
-f_Block_Portscanners(){
+sys_Block_Portscanners(){
     # see cat /proc/net/xt_recent/portscan for added ip's.    
     # These rules add scanners to the portscan list, and logs the attempt. 
     portscan_ranges=('1:21' '23:24' '26:52' '54:66' '68:79' '81:442' '444:464' '466:553' '555:586' '588:992' '994:1934' '1936:3477' '3479:4189' '4191:5348' '5351:8442' '8444:9000' '9002:9417' '9419:59999' '61001:65535')    
@@ -162,7 +177,7 @@ f_Block_Portscanners(){
     #—hitcount the number of hits withing the time defined be —seconds at which point the rule gets activated.	
 }
 
-f_Allow_User_Connections(){
+sys_Allow_User_Connections(){
     for port in "${!User_Connections[@]}"
     do
 	iptables -A OUTPUT -p udp --dport "$port" -m conntrack --ctstate NEW,ESTABLISHED -j LOG_ACCEPT -m comment --comment "${User_Connections[$port]}"
@@ -173,7 +188,7 @@ f_Allow_User_Connections(){
 }
 
 # Optional setups
-f_do_ipsetSetup(){
+sys_do_ipsetSetup(){
 cat <<EOF > /lib/systemd/system/ipset.service
 [Unit]
 Description=Loading IP Sets
@@ -209,7 +224,7 @@ systemctl enable ipset
 echo "finished ipsetSetup"
 }
 
-f_do_sslhSetup(){
+sys_do_sslhSetup(){
     #SSLH SETUP
     # not used
 #    localsship=192.168.1.5
@@ -229,7 +244,7 @@ f_do_sslhSetup(){
     echo "finished sslhSetup"
 }
 
-f_Allow_Safe_ICMP(){
+sys_Allow_Safe_ICMP(){
 # Allow three types of ICMP packets to be received (so people can
 # check our presence), but restrict the flow to avoid ping flood
 # attacks. See iptables -p icmp --help for available icmp types.
@@ -248,26 +263,26 @@ done
 # connections from any host to 60 per second.  This does *not* do rate
 # limiting overall, because then someone could easily shut us down by
 # saturating the limit.
-f_Synflood_Protect(){
+sys_Synflood_Protect(){
     # see cat /proc/net/xt_recent/synflood for added ip's.
     iptables -A INPUT -m conntrack --ctstate NEW -p tcp -m tcp --syn -m recent --name synflood --set
     iptables -A INPUT -m conntrack --ctstate NEW -p tcp -m tcp --syn -m recent --name synflood --update --seconds 1 --hitcount 90 -j LOG_DROP -m comment --comment "synflood-protection"
 }
 
-f_Protect_SSH(){
+sys_Protect_SSH(){
     # Defend against brute-force attempts on ssh-port. -I flag to place at
     # top of chain.
     iptables -A INPUT -p tcp --dport 22 -m conntrack --ctstate NEW -m recent --set -m comment --comment "Limit SSH IN" # add ip to recent list with --set.
     iptables -A INPUT -p tcp --dport 22 -m conntrack --ctstate NEW -m recent --update --seconds 60 --hitcount 10 -j LOG_DROP -m comment --comment "Limit SSH IN"
 }
 
-f_Allow_SSH(){
+sys_Allow_SSH(){
 # Secondly, to make sure you don't lock yourself out from your server
 # you should add two allow ssh rules to iptables first thing:
-iptables -A INPUT -p tcp -s $1 -d $2 -m tcp --dport 22 -j LOG_ACCEPT -m comment --comment "allow SSH IN"
+iptables -A INPUT -p tcp -s "${1}" -d "${2}" -m tcp --dport 22 -j LOG_ACCEPT -m comment --comment "allow SSH IN"
 }
 
-f_Allow_Mosh(){
+sys_Allow_Mosh(){
 # These udp-ports are for Mosh which is an ssh wrapper software for
 # better responsiveness and roaming.
     iptables -A INPUT -p udp -m udp --dport "$1" -j LOG_ACCEPT -m comment --comment "Mosh UDP IN"
@@ -291,21 +306,21 @@ f_Allow_Mosh(){
 # 9980=LibreOffice Online websocket daemon.
 # 9418=git with git-daemon
 # 1935=rtmp ports for video streaming, 554=RSTP for streaming.
-f_Allow_Services(){
-    local -n _Services=$1
-    for port in "${_Services[@]}"
+sys_Allow_Services(){
+    local -n _Services="${1}"
+    for port in "${!_Services[@]}"
     do
-	iptables -A INPUT -p udp --dport $port -m conntrack --ctstate NEW,ESTABLISHED -j LOG_ACCEPT -m comment --comment "service-connection-request" 
-	iptables -A INPUT -p tcp --dport $port -m conntrack --ctstate NEW,ESTABLISHED -j LOG_ACCEPT -m comment --comment "service-connection-request"
+	iptables -A INPUT -p udp --dport "${port}" -m conntrack --ctstate NEW,ESTABLISHED -j LOG_ACCEPT -m comment --comment "${_Services[$port]}"
+	iptables -A INPUT -p tcp --dport "${port}" -m conntrack --ctstate NEW,ESTABLISHED -j LOG_ACCEPT -m comment --comment "${_Services[$port]}"
 	
 	#iptables -A INPUT -p tcp -s $server_local_ip --in-interface ${localif} --dport 389 -j LOG_ACCEPT -m comment --comment "ldap"
 
 	# Specifically allow outgoing established connections from our services. (This should be taken care of automatically by above statement)
-	iptables -A OUTPUT -p udp --match multiport --sports $port -m conntrack --ctstate ESTABLISHED -j LOG_ACCEPT -m comment --comment "service-connection-reply"
-	iptables -A OUTPUT -p tcp --match multiport --sports $port -m conntrack --ctstate ESTABLISHED -j LOG_ACCEPT -m comment --comment "service-connection-reply"
+	iptables -A OUTPUT -p udp --match multiport --sports "${port}" -m conntrack --ctstate ESTABLISHED -j LOG_ACCEPT -m comment --comment "${_Services[$port]}"
+	iptables -A OUTPUT -p tcp --match multiport --sports "${port}" -m conntrack --ctstate ESTABLISHED -j LOG_ACCEPT -m comment --comment "${_Services[$port]}"
 	# Allow opening new connections on these same services from server.
-	iptables -A OUTPUT -p udp --match multiport --dports $port -m conntrack --ctstate NEW,ESTABLISHED -j LOG_ACCEPT -m comment --comment "service-connection-reply"
-	iptables -A OUTPUT -p tcp --match multiport --dports $port -m conntrack --ctstate NEW,ESTABLISHED -j LOG_ACCEPT -m comment --comment "service-connection-reply"
+	iptables -A OUTPUT -p udp --match multiport --dports "${port}" -m conntrack --ctstate NEW,ESTABLISHED -j LOG_ACCEPT -m comment --comment "${_Services[$port]}"
+	iptables -A OUTPUT -p tcp --match multiport --dports "${port}" -m conntrack --ctstate NEW,ESTABLISHED -j LOG_ACCEPT -m comment --comment "${_Services[$port]}"
     done
 }
 	# iptables -A OUTPUT -p udp --match multiport --sports 80,443,587,465,25,143,993,110,995,4190,8443,3478,5349,9980,9418 -m conntrack --ctstate ESTABLISHED -j LOG_ACCEPT -m comment --comment "service-connection-reply"
@@ -329,7 +344,7 @@ f_Allow_Services(){
 #done 
 
 # Log and drop all packages which are not specifically allowed.
-f_Default_Drop_Log(){
+sys_Default_Drop_Log(){
 iptables -A INPUT -s 0.0.0.0/0 -d 0.0.0.0/0 -j LOG_DROP
 iptables -A OUTPUT -s 0.0.0.0/0 -d 0.0.0.0/0 -j LOG_DROP
 iptables -A FORWARD -s 0.0.0.0/0 -d 0.0.0.0/0 -j LOG_DROP
@@ -338,10 +353,10 @@ iptables -P OUTPUT DROP
 iptables -P FORWARD DROP 
 }
 
-f_Save_Config(){
+sys_Save_Config(){
     # Save configuration across network restarts and reboots.
     /sbin/iptables-save > /etc/iptables.up.rules
-    if [[ $1 == "sslh" ]] || [[ $2 == "sslh" ]] ; then
+    if [[ "${1}" == "sslh" ]] || [[ "${2}" == "sslh" ]] ; then
 cat <<EOT > /etc/network/if-pre-up.d/iptables
 #!/bin/bash
 /sbin/iptables-restore < /etc/iptables.up.rules
@@ -363,34 +378,34 @@ chmod u+x /etc/network/if-pre-up.d/iptables
 main(){
     iptables -P OUTPUT ACCEPT
     iptables --flush    
-    f_Setup_Log_Chains
-    f_Allow_Related_Established
-    f_Allow_Localhost
-    f_Allow_To_VPN "${VPN_ports[@]}"
-    f_Reject_RFC1918 "$pubif"
-    f_Drop_Invalid_Packets
-#    f_Allow_Extra_SSH_Port "1234"
-    f_Block_Portscanners
-    f_Allow_User_Connections "User_Connections"
-    cd $pwd || exit 1
-    case $1 in
-	"sslh") f_do_sslhSetup ;;
-	"ipset") f_do_ipsetSetup ;;
+    sys_Setup_Log_Chains
+    sys_Allow_Related_Established
+    sys_Allow_Localhost
+    sys_Allow_To_VPN "${VPN_ports[@]}"
+    sys_Allow_User_Connections "User_Connections"
+    sys_Reject_RFC1918 "$pubif"    
+    cd "$pwd" || exit 1
+    case "${1}" in
+	"sslh") sys_do_sslhSetup ;;
+	"ipset") sys_do_ipsetSetup ;;
 	*) echo "No arguments given. Ok. Continuing."
     esac
-    case $2 in
-	"sslh") f_do_sslhSetup ;;
-	"ipset") f_do_ipsetSetup ;;
+    case "${2}" in
+	"sslh") sys_do_sslhSetup ;;
+	"ipset") sys_do_ipsetSetup ;;
 	*) echo "No second argument given. Ok. Continuing."    
     esac
-    f_Allow_Safe_ICMP
-    f_Synflood_Protect
-    f_Protect_SSH
-    f_Allow_SSH $service_local_ip $server_local_ip
-    f_Allow_Mosh "60000:61000"
-    f_Allow_Multicast_DNS ${localif}
-    f_Allow_Services "Services"
-    f_Default_Drop_Log
-    f_Save_Config "$@"
+    sys_Drop_Invalid_Packets
+#    sys_Allow_Extra_SSH_Port "1234"
+    sys_Block_Portscanners
+    sys_Synflood_Protect
+    sys_Allow_Safe_ICMP        
+    sys_Protect_SSH
+    sys_Allow_SSH "${service_local_ip}" "${server_local_ip}"
+    sys_Allow_Mosh "60000:61000"
+    sys_Allow_Multicast_DNS "${localif}"
+    sys_Allow_Services "${Services[@]}"
+    sys_Default_Drop_Log
+    sys_Save_Config "$@"
 }
 main "$@"
