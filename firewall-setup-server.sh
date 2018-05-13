@@ -404,7 +404,7 @@ main(){
     sys_Allow_SSH "${service_local_ip}" "${server_local_ip}"
     sys_Allow_Mosh "60000:61000"
     sys_Allow_Multicast_DNS "${localif}"
-    sys_Allow_Services "${Services[@]}"
+    sys_Allow_Services "Services"
     sys_Default_Drop_Log
     sys_Save_Config "$@"
 }

@@ -6,8 +6,6 @@
 #fix ssh issue
 #fix flashrom to boot cryptomount -a and configfile (crypto0)/boot/grub/grub.cfg
 
-
-
 # -------------------------------------------------------- #
 # ipset-update.sh (C) 2012-2015 Matt Parnell http://www.mattparnell.com
 # Licensed under the GNU-GPLv2+
@@ -74,7 +72,7 @@ ENABLE_SSH_BLOCK=1
 LISTDIR="/var/cache/blocklists"
 FIREHOLDIR="/var/cache" # this will create /var/cache/blocklist-ipsets from the firehol github repo
 # create cache directory for our lists if it isn't there
-[ ! -d $LISTDIR ] && mkdir $LISTDIR
+[ ! -d "${LISTDIR}" ] && mkdir "${LISTDIR}"
 
 # countries to block, must be lcase
 COUNTRIES=(af ae ir iq tr cn sa sy ru ua hk id kz kw ly)
@@ -97,7 +95,8 @@ exclude_patterns=('ransomware' 'hphosts' 'bambenek' 'cleanmx' 'coinbl' 'cta_cryp
 # Script-code below
 # -------------------------------------------------------- #
 shopt -s extglob
-removeOldLists(){
+removeOldLists()
+{
     rm -r $LISTDIR && mkdir $LISTDIR
     # remove old countries list
     #[ -f $LISTDIR/countries.txt ] && rm $LISTDIR/countries.txt
@@ -112,27 +111,30 @@ IPTABLES=$(iptables-save)
 
 importList(){
     local list="$1"    
-    if [ -f $LISTDIR/$list.txt ] || [ -f $LISTDIR/$list.gz ]; then
+    if [ -f "${LISTDIR}/${list}.txt" ] || [ -f "${LISTDIR}/${list}.gz" ]
+    then
 	echo "Importing $list blocks..."
 	if (( ${#list} > 27 ))
 	then
 	    local list="${list[0]: -27}"
 	fi	
-	ipset create -exist $list hash:net maxelem 4294967295
-	ipset create -exist $list-TMP hash:net maxelem 4294967295
-	ipset flush $list-TMP &> /dev/null
+	ipset create -exist "${list}" hash:net maxelem 4294967295
+	ipset create -exist "${list}-TMP" hash:net maxelem 4294967295
+	ipset flush "${list}-TMP" &> /dev/null
 	#the second param determines if we need to use zcat or not
-	if [ $2 = 1 ]; then
-	    zcat $LISTDIR/$1.gz | grep  -v \# | grep -v ^$ | grep -v 127\.0\.0 | pg2ipset - - $list-TMP | ipset restore
+	if [ $2 = 1 ]
+	then
+	    zcat "${LISTDIR}/${1}.gz" | grep  -v \# | grep -v ^$ | grep -v 127\.0\.0 | pg2ipset - - "${list}-TMP" | ipset restore
 	else
-	    awk '!x[$0]++' $LISTDIR/$1.txt | grep  -v \# | grep -v ^$ |  grep -v 127\.0\.0 | sed -e "s/^/add\ \-exist\ $list\-TMP\ /" | ipset restore
+	    awk '!x[$0]++' "${LISTDIR}/${1}".txt | grep  -v \# | grep -v ^$ |  grep -v 127\.0\.0 | sed -e "s/^/add\ \-exist\ $list\-TMP\ /" | ipset restore
 	fi
 	
-	ipset swap $list $list-TMP &> /dev/null
-	ipset destroy $list-TMP &> /dev/null
+	ipset swap "{$list}" "${list}-TMP" &> /dev/null
+	ipset destroy "${list}-TMP" &> /dev/null
 	
 	# only create if the iptables rules don't already exist
-	if ! echo $IPTABLES | grep -q "\-A\ INPUT\ \-m\ set\ \-\-match\-set\ $list\ src\ \-\j\ LOG_DROP"; then
+	if ! echo "${IPTABLES}" | grep -q "\-A\ INPUT\ \-m\ set\ \-\-match\-set\ $list\ src\ \-\j\ LOG_DROP"
+	then
 	    #iptables -A INPUT -m set --match-set $list src -j ULOG --ulog-prefix "Blocked input $list"
 	    #iptables -A FORWARD -m set --match-set $list src -j ULOG --ulog-prefix "Blocked fwd $list"
 	    #iptables -A FORWARD -m set --match-set $list dst -j ULOG --ulog-prefix "Blocked fwd $list"
@@ -142,59 +144,70 @@ importList(){
 	    #iptables -A FORWARD -m set --match-set $list src -j DROP
 	    #iptables -A FORWARD -m set --match-set $list dst -j REJECT
 	    #iptables -A OUTPUT -m set --match-set $list dst -j REJECT
+
 	    #My change:
-	    iptables -A INPUT -m set --match-set $list src -j LOG_DROP
-	    iptables -A FORWARD -m set --match-set $list src -j LOG_DROP
-	    iptables -A FORWARD -m set --match-set $list dst -j LOG_DROP
-	    iptables -A OUTPUT -m set --match-set $list dst -j LOG_DROP
+	    iptables -A INPUT -m set --match-set "${list}" src -j LOG_DROP
+	    iptables -A OUTPUT -m set --match-set "${list}" dst -j LOG_DROP
+	    # enable these if you do forwarding
+	    #iptables -A FORWARD -m set --match-set $list src -j LOG_DROP
+	    #iptables -A FORWARD -m set --match-set $list dst -j LOG_DROP	    
 	fi
     else
 	echo "List $1.txt does not exist."
     fi
 }
 
-if [ $ENABLE_BLUETACK = 1 ]; then
+if [ "${ENABLE_BLUETACK}" = 1 ]
+then
   # get, parse, and import the bluetack lists
   # they are special in that they are gz compressed and require
   # pg2ipset to be inserted
   i=0
-  for list in ${BLUETACK[@]}; do  
-	if [ eval $(wget --quiet -O /tmp/${BLUETACKALIAS[i]}.gz http://list.iblocklist.com/?list=$list&fileformat=p2p&archiveformat=gz) ]; then
+  for list in ${BLUETACK[@]}
+  do  
+      if [ eval $(wget --quiet -O /tmp/${BLUETACKALIAS[i]}.gz http://list.iblocklist.com/?list=$list&fileformat=p2p&archiveformat=gz) ]
+      then
 	  mv /tmp/${BLUETACKALIAS[i]}.gz $LISTDIR/${BLUETACKALIAS[i]}.gz
-	else
+      else
 	  echo "Using cached list for ${BLUETACKALIAS[i]}."
-	fi
-	
-	echo "Importing bluetack list ${BLUETACKALIAS[i]}..."
-  
-	importList ${BLUETACKALIAS[i]} 1
-	
-	i=$((i+1))
+      fi
+      
+      echo "Importing bluetack list ${BLUETACKALIAS[i]}..."
+      
+      importList ${BLUETACKALIAS[i]} 1
+      
+      i=$((i+1))
   done
 fi
 
-if [ $ENABLE_COUNTRY = 1 ]; then
+if [ $ENABLE_COUNTRY = 1 ]
+then
   # get the country lists and cat them into a single file
-  for country in ${COUNTRIES[@]}; do
-	if [ eval $(wget --quiet -O /tmp/$country.txt http://www.ipdeny.com/ipblocks/data/countries/$country.zone) ]; then
-	  cat /tmp/$country.txt >> $LISTDIR/countries.txt
-	  rm /tmp/$country.txt
+    for country in ${COUNTRIES[@]}
+    do
+	if [ eval $(wget --quiet -O /tmp/${country}.txt http://www.ipdeny.com/ipblocks/data/countries/$country.zone) ]
+	then
+	  cat /tmp/${country}.txt >> ${LISTDIR}/countries.txt
+	  rm /tmp/${country}.txt
 	fi
-  done
-  
-  importList "countries" 0
+    done
+    
+    importList "countries" 0
 fi
 
 
 if [ $ENABLE_TORBLOCK = 1 ]; then
   # get the tor lists and cat them into a single file
-  for ip in $(ip -4 -o addr | awk '!/^[0-9]*: ?lo|link\/ether/ {gsub("/", " "); print $4}'); do
-	for port in ${PORTS[@]}; do
-	  if [ eval $(wget --quiet -O /tmp/$port.txt https://check.torproject.org/cgi-bin/TorBulkExitList.py?ip=$ip&port=$port) ]; then
-		cat /tmp/$port.txt >> $LISTDIR/tor.txt
-		rm /tmp/$port.txt
+    for ip in $(ip -4 -o addr | awk '!/^[0-9]*: ?lo|link\/ether/ {gsub("/", " "); print $4}')
+    do
+      for port in "${PORTS[@]}"
+      do
+	  if [ eval $(wget --quiet -O "/tmp/${port}.txt" https://check.torproject.org/cgi-bin/TorBulkExitList.py?ip=$ip&port=$port) ]
+	  then
+		cat "/tmp/${port}.txt" >> "${LISTDIR}/tor.txt"
+		rm "/tmp/${port}.txt"
 	  fi
-	done
+      done
   done 
   
   importList "tor" 0
@@ -203,16 +216,16 @@ fi
 # add any custom import lists below
 # ex: importTextList "custom"
 
-if [ $ENABLE_FIREHOL = 1 ]; then
-    if [[ -d $FIREHOLDIR ]] ; then
-	cd $FIREHOLDIR
+if [ "${ENABLE_FIREHOL}" = 1 ]; then
+    if [[ -d "${FIREHOLDIR}" ]] ; then
+	cd "${FIREHOLDIR}"
 	git pull https://github.com/firehol/blocklist-ipsets
-	cd $FIREHOLDIR/blocklist-ipsets	
+	cd "${FIREHOLDIR}/blocklist-ipsets"
     else
 	git clone https://github.com/firehol/blocklist-ipsets $FIREHOLDIR
-	cd $FIREHOLDIR/blocklist-ipsets
+	cd "${FIREHOLDIR}/blocklist-ipsets"
     fi
-    for list in $(ls $FIREHOLDIR/blocklist-ipsets | grep .ipset); do
+    for list in $(ls "${FIREHOLDIR}/blocklist-ipsets" | grep .ipset); do
 #    for list in $($FIREHOL_BLISTS); do
 	# importList function wants .txt extensions in $LIST directory.
 	#	if [[ $list = *.ipset ]]  ; then
@@ -222,11 +235,11 @@ if [ $ENABLE_FIREHOL = 1 ]; then
 		continue 2
 	    fi
 	done
-	    grep -E "[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}/*[0-9]*" $FIREHOLDIR/blocklist-ipsets/${list} > $LISTDIR/${list%%.ipset}.txt
+	    grep -E "[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}/*[0-9]*" "${FIREHOLDIR}/blocklist-ipsets/${list}" > "${LISTDIR}/${list%%.ipset}.txt"
 	# elif [[ $list = *.netset ]]  ; then	    
 	    #     grep -E "[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}/*[0-9]*" $FIREHOLDIR/blocklist-ipsets/${list} > $LISTDIR/${list}.txt
 	# fi
-	importList ${list%%.ipset} 0
+	importList "${list%%.ipset}" 0
     done;
     cd -
 fi
@@ -254,12 +267,12 @@ f_do_AbuseIPDB(){
 	rm "sitemap?page=$i"
     done
 }
-if [ $ENABLE_ABUSEIPDB = 1 ]; then
+if [ "${ENABLE_ABUSEIPDB}" = 1 ]; then
     echo "Downloading and parsing ip sets from https://www.abuseipdb.com/"
     f_do_AbuseIPDB "$LISTDIR/abuseipdb.txt"
     importList "abuseipdb" 0
 fi
-if [ $ENABLE_SSH_BLOCK = 1 ]; then
+if [ "${ENABLE_SSH_BLOCK}" = 1 ]; then
     ipset create fwknop_allow hash:ip,port timeout 30
     iptables -A INPUT -m set --match-set fwknop_allow src,dst -j LOG_ACCEPT
 fi
